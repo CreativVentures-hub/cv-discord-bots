@@ -1,11 +1,13 @@
-// index.js - Main bot file
+// index.js - Main bot file with n8n API integration
 require('dotenv').config();
 const { Client, GatewayIntentBits, ActivityType } = require('discord.js');
 const express = require('express');
+const cors = require('cors');
 const { handleMessage } = require('./utils/message-handler');
 
-// Express for Railway health checks
+// Express for Railway health checks AND n8n API
 const app = express();
+app.use(cors());
 app.use(express.json());
 
 app.get('/', (req, res) => {
@@ -86,7 +88,121 @@ const agents = {
   }
 };
 
+// =====================================
+// NEW: n8n API Endpoints
+// =====================================
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  const healthStatus = {
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    bots: {}
+  };
+  
+  // Check each bot's status
+  Object.entries(agents).forEach(([key, agent]) => {
+    healthStatus.bots[key] = {
+      name: agent.name,
+      connected: agent.client && agent.client.isReady(),
+      channel: agent.channel
+    };
+  });
+  
+  res.json(healthStatus);
+});
+
+// Main endpoint for n8n to send messages through specific bots
+app.post('/api/:botKey/send-message', async (req, res) => {
+  try {
+    const { botKey } = req.params;
+    const { channelId, messageId, response, action = 'reply' } = req.body;
+    
+    console.log(`[${botKey}] Received n8n request:`, { channelId, messageId, action });
+    
+    // Validate bot exists
+    const agent = agents[botKey];
+    if (!agent) {
+      return res.status(404).json({ 
+        error: 'Bot not found',
+        availableBots: Object.keys(agents)
+      });
+    }
+    
+    // Check if bot is connected
+    if (!agent.client || !agent.client.isReady()) {
+      return res.status(503).json({ 
+        error: `${agent.name} is not connected to Discord`
+      });
+    }
+    
+    // Get the channel
+    const channel = await agent.client.channels.fetch(channelId);
+    if (!channel) {
+      return res.status(404).json({ 
+        error: 'Channel not found',
+        channelId 
+      });
+    }
+    
+    let result;
+    
+    if (action === 'reply' && messageId) {
+      // Reply to specific message
+      const originalMessage = await channel.messages.fetch(messageId);
+      result = await originalMessage.reply(response);
+      console.log(`[${agent.name}] Replied to message ${messageId}`);
+    } else {
+      // Send new message
+      result = await channel.send(response);
+      console.log(`[${agent.name}] Sent new message to ${channel.name}`);
+    }
+    
+    res.json({ 
+      success: true,
+      messageId: result.id,
+      channelName: channel.name,
+      bot: agent.name,
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('Error sending message:', error);
+    res.status(500).json({ 
+      error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  }
+});
+
+// Generic endpoint that accepts bot name in body (backwards compatibility)
+app.post('/api/send-message', async (req, res) => {
+  const { bot, botKey, ...messageData } = req.body;
+  const key = botKey || bot || 'olivia'; // Default to OLIVIA if not specified
+  
+  // Forward to specific bot endpoint
+  req.body = messageData;
+  req.params = { botKey: key };
+  return app._router.handle(req, res);
+});
+
+// List all available bots
+app.get('/api/bots', (req, res) => {
+  const botList = Object.entries(agents).map(([key, agent]) => ({
+    key,
+    name: agent.name,
+    channel: agent.channel,
+    status: agent.client && agent.client.isReady() ? 'online' : 'offline',
+    color: agent.color
+  }));
+  
+  res.json({ bots: botList });
+});
+
+// =====================================
 // Initialize all bots
+// =====================================
 async function initializeBots() {
   for (const [key, agent] of Object.entries(agents)) {
     try {
@@ -142,6 +258,11 @@ async function initializeBots() {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Railway health check server running on port ${PORT}`);
+  console.log(`📡 n8n API endpoints available at:`);
+  console.log(`   - GET  /health`);
+  console.log(`   - GET  /api/bots`);
+  console.log(`   - POST /api/:botKey/send-message`);
+  console.log(`   - POST /api/send-message`);
   initializeBots();
 });
 

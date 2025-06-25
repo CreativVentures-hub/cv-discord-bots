@@ -1,3 +1,4 @@
+// index.js - Main bot file
 require('dotenv').config();
 const { Client, GatewayIntentBits, ActivityType } = require('discord.js');
 const express = require('express');
@@ -108,15 +109,19 @@ async function initializeBots() {
         });
       });
 
-      // Message handler
+      // Message handler - UPDATED
       client.on('messageCreate', async (message) => {
         if (message.author.bot) return;
         
+        // Create flexible pattern for agent name matching
+        const agentNamePattern = new RegExp(agent.name.replace('-', '[-\\s]?'), 'i');
+        
         // Check if message is relevant to this agent
-        if (message.channel.name === agent.channel || 
-            message.content.includes(`@${agent.name}`) ||
-            message.content.toLowerCase().includes(key)) {
-          
+        if (
+          message.channel.name === agent.channel || 
+          agentNamePattern.test(message.content) ||
+          (message.mentions.has(client.user) && message.content.toLowerCase().includes(key))
+        ) {
           await handleMessage(message, agent, client);
         }
       });

@@ -225,19 +225,23 @@ async function initializeBots() {
         });
       });
 
-      // Message handler - UPDATED
+      // Message handler - UPDATED FOR ALL AGENTS
       client.on('messageCreate', async (message) => {
         if (message.author.bot) return;
         
-        // Create flexible pattern for agent name matching
-        const agentNamePattern = new RegExp(agent.name.replace('-', '[-\\s]?'), 'i');
+        // Create flexible patterns for agent name matching
+        const fullNamePattern = new RegExp(agent.name.replace('-', '[-\\s]?'), 'i');
+        const shortNamePattern = new RegExp(`\\b${key}\\b`, 'i'); // Matches just the first name
+        const mentionPattern = message.mentions.has(client.user);
         
         // Check if message is relevant to this agent
         if (
-          message.channel.name === agent.channel || 
-          agentNamePattern.test(message.content) ||
-          (message.mentions.has(client.user) && message.content.toLowerCase().includes(key))
+          message.channel.name === agent.channel || // In agent's channel
+          fullNamePattern.test(message.content) ||  // Full name mentioned
+          shortNamePattern.test(message.content) || // Short name mentioned (NEW!)
+          mentionPattern // Bot is @mentioned
         ) {
+          console.log(`${agent.name} triggered by: "${message.content}"`);
           await handleMessage(message, agent, client);
         }
       });
@@ -263,6 +267,8 @@ app.listen(PORT, () => {
   console.log(`   - GET  /api/bots`);
   console.log(`   - POST /api/:botKey/send-message`);
   console.log(`   - POST /api/send-message`);
+  console.log(`\n✨ All agents now respond to short names!`);
+  console.log(`   Examples: "olivia", "brandon", "maya", etc.`);
   initializeBots();
 });
 
